@@ -1,0 +1,1524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Battery Intelligence Dashboard — LSTM & GRU BMS</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Inter:wght@300;400;600&display=swap');
+
+  :root {
+    --bg: #060b14;
+    --panel: #0c1624;
+    --border: #1a3a5c;
+    --accent: #00d4ff;
+    --accent2: #00ff9d;
+    --accent3: #ff6b35;
+    --warn: #ffcc00;
+    --text: #c8e8ff;
+    --dim: #4a7090;
+    --glow: 0 0 20px rgba(0,212,255,0.3);
+    --glow2: 0 0 20px rgba(0,255,157,0.3);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Animated grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .header {
+    position: relative;
+    z-index: 10;
+    padding: 20px 30px 16px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(0,212,255,0.05) 0%, transparent 100%);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .header-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.4rem;
+    font-weight: 900;
+    color: var(--accent);
+    text-shadow: var(--glow);
+    letter-spacing: 2px;
+  }
+
+  .header-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--dim);
+    letter-spacing: 1px;
+    margin-top: 4px;
+  }
+
+  .status-bar {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent2);
+    box-shadow: 0 0 8px var(--accent2);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+
+  .tabs {
+    position: relative; z-index: 10;
+    display: flex;
+    gap: 2px;
+    padding: 16px 30px 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab {
+    padding: 10px 24px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    color: var(--dim);
+    background: transparent;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .tab:hover { color: var(--accent); border-color: var(--border); }
+
+  .tab.active {
+    color: var(--accent);
+    background: var(--panel);
+    border-color: var(--border);
+    border-bottom-color: var(--panel);
+    box-shadow: var(--glow);
+  }
+
+  .page { display: none; padding: 24px 30px; position: relative; z-index: 5; }
+  .page.active { display: block; }
+
+  /* ===== GAUGES ===== */
+  .gauges-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .gauge-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 16px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    transition: box-shadow 0.3s;
+  }
+
+  .gauge-card:hover { box-shadow: var(--glow); }
+
+  .gauge-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  }
+
+  .gauge-label {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 2px;
+    color: var(--dim);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+  }
+
+  .gauge-wrap { position: relative; width: 150px; height: 75px; margin: 0 auto 12px; }
+
+  .gauge-wrap svg { width: 100%; height: 100%; }
+
+  .gauge-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.8rem;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .gauge-unit {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--dim);
+    margin-top: 4px;
+  }
+
+  /* ===== PANELS ===== */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+  @media (max-width: 1000px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .panel-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: uppercase;
+  }
+
+  .panel-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
+  /* ===== EV SIM ===== */
+  .ev-container {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+
+  .road-scene {
+    position: relative;
+    height: 180px;
+    background: linear-gradient(180deg, #0a1a2e 0%, #0f2a40 60%, #1a3a50 100%);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+
+  /* Road */
+  .road-scene::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0; right: 0;
+    height: 55px;
+    background: linear-gradient(180deg, #1c2830 0%, #2a3840 100%);
+    border-top: 2px solid #3a5060;
+  }
+
+  .road-stripe {
+    position: absolute;
+    bottom: 22px;
+    height: 6px;
+    width: 60px;
+    background: var(--warn);
+    border-radius: 3px;
+    animation: stripeMove 0.5s linear infinite;
+  }
+
+  @keyframes stripeMove {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-80px); }
+  }
+
+  .car {
+    position: absolute;
+    bottom: 48px;
+    left: 120px;
+    width: 120px;
+    transition: left 0.1s;
+  }
+
+  .car svg { width: 100%; height: auto; filter: drop-shadow(0 4px 12px rgba(0,212,255,0.4)); }
+
+  /* Battery fill on car */
+  .car-battery-fill {
+    transition: width 0.5s ease;
+  }
+
+  .speed-display {
+    position: absolute;
+    top: 12px; right: 16px;
+    font-family: 'Orbitron', monospace;
+    font-size: 1.1rem;
+    color: var(--accent2);
+    text-shadow: var(--glow2);
+  }
+
+  .env-display {
+    position: absolute;
+    top: 12px; left: 16px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--dim);
+    line-height: 1.6;
+  }
+
+  /* Trees */
+  .tree {
+    position: absolute;
+    bottom: 54px;
+    animation: treeMove 2s linear infinite;
+  }
+
+  @keyframes treeMove {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-800px); }
+  }
+
+  /* Playback controls */
+  .sim-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    padding: 8px 20px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: rgba(0,212,255,0.08);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+
+  .btn:hover { background: rgba(0,212,255,0.2); box-shadow: var(--glow); }
+  .btn.active-btn { background: var(--accent); color: #000; }
+
+  .btn.green { border-color: var(--accent2); color: var(--accent2); background: rgba(0,255,157,0.08); }
+  .btn.green:hover { background: rgba(0,255,157,0.2); }
+
+  .speed-slider-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--dim);
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    width: 120px;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  /* Model toggle */
+  .model-toggle {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+  }
+
+  .toggle-btn {
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    transition: all 0.2s;
+    background: transparent;
+    color: var(--dim);
+  }
+
+  .toggle-btn.on-lstm { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.1); }
+  .toggle-btn.on-gru  { border-color: var(--accent2); color: var(--accent2); background: rgba(0,255,157,0.1); }
+  .toggle-btn.on-actual { border-color: var(--accent3); color: var(--accent3); background: rgba(255,107,53,0.1); }
+
+  /* Metrics row */
+  .metrics-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  @media (max-width: 800px) { .metrics-row { grid-template-columns: repeat(2, 1fr); } }
+
+  .metric-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .metric-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .metric-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+
+  .metric-bar {
+    margin-top: 8px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .metric-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  /* Chart container */
+  .chart-container { position: relative; height: 200px; }
+  .chart-lg { height: 260px; }
+
+  /* Hyperparameter page */
+  .heatmap-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .heatmap-cell {
+    border-radius: 6px;
+    padding: 10px 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+  }
+
+  .heatmap-cell:hover { transform: scale(1.05); z-index: 10; }
+
+  .heatmap-opt {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.68rem;
+    color: rgba(255,255,255,0.9);
+    margin-bottom: 4px;
+  }
+
+  .heatmap-val {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .heatmap-sub {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.6rem;
+    color: rgba(255,255,255,0.6);
+    margin-top: 2px;
+  }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute;
+    background: rgba(10,20,40,0.95);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text);
+    pointer-events: none;
+    z-index: 1000;
+    min-width: 160px;
+    box-shadow: var(--glow);
+    display: none;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  .badge-best { background: rgba(0,255,157,0.2); color: var(--accent2); border: 1px solid var(--accent2); }
+  .badge-lstm { background: rgba(0,212,255,0.2); color: var(--accent); border: 1px solid var(--accent); }
+  .badge-gru  { background: rgba(0,255,157,0.2); color: var(--accent2); border: 1px solid var(--accent2); }
+
+  /* Table */
+  .result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+  }
+
+  .result-table th {
+    color: var(--accent);
+    padding: 8px 10px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+  }
+
+  .result-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(26,58,92,0.5);
+    color: var(--text);
+  }
+
+  .result-table tr:hover td { background: rgba(0,212,255,0.05); }
+
+  .best-row td { color: var(--accent2) !important; }
+
+  /* Progress bar */
+  .progress-bar-wrap { margin-bottom: 10px; }
+
+  .progress-label {
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--dim);
+    margin-bottom: 5px;
+  }
+
+  .progress-bar {
+    height: 8px;
+    background: var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 1.5s ease;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .sep { height: 16px; }
+
+  .info-tag {
+    display: inline-block;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--dim);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin-right: 6px;
+  }
+
+  canvas { border-radius: 6px; }
+
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title">⚡ BATTERY INTELLIGENCE SYSTEM</div>
+    <div class="header-sub">LSTM · GRU · REINFORCEMENT LEARNING · SOC / SOH / RUL ESTIMATION</div>
+  </div>
+  <div class="status-bar">
+    <div class="status-dot"></div>
+    <span style="color:var(--accent2);">SYSTEM ONLINE</span>
+    <span id="liveClock" style="color:var(--dim);"></span>
+    <span class="info-tag">UDDS DRIVE CYCLE</span>
+    <span class="info-tag">LG 18650</span>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab('sim')">🚗 EV Simulation</div>
+  <div class="tab" onclick="showTab('dashboard')">📊 BMS Dashboard</div>
+  <div class="tab" onclick="showTab('models')">🧠 Model Analysis</div>
+  <div class="tab" onclick="showTab('hyper')">🔧 Hyperparameters</div>
+</div>
+
+<!-- ===================== TAB 1: EV SIMULATION ===================== -->
+<div id="tab-sim" class="page active">
+
+  <div class="ev-container">
+    <div class="panel-title">🚗 EV DRIVE CYCLE SIMULATION — UDDS CYCLE · REAL DATA</div>
+
+    <div class="road-scene" id="roadScene">
+      <!-- Road stripes -->
+      <div class="road-stripe" style="left:50px;"></div>
+      <div class="road-stripe" style="left:200px; animation-delay:-0.2s"></div>
+      <div class="road-stripe" style="left:350px; animation-delay:-0.4s"></div>
+      <div class="road-stripe" style="left:500px; animation-delay:-0.6s"></div>
+      <div class="road-stripe" style="left:650px; animation-delay:-0.8s"></div>
+      <div class="road-stripe" style="left:800px; animation-delay:-1.0s"></div>
+
+      <!-- Trees -->
+      <svg class="tree" style="left:100px; animation-duration:3s;" width="18" height="40" viewBox="0 0 18 40">
+        <rect x="7" y="24" width="4" height="16" fill="#2a4a2a"/>
+        <polygon points="9,2 1,24 17,24" fill="#1a6a2a"/>
+        <polygon points="9,6 2,20 16,20" fill="#2a8a3a"/>
+      </svg>
+      <svg class="tree" style="left:280px; animation-duration:3s; animation-delay:-1s;" width="14" height="32" viewBox="0 0 14 32">
+        <rect x="5" y="20" width="4" height="12" fill="#2a4a2a"/>
+        <polygon points="7,2 1,20 13,20" fill="#1a6a2a"/>
+      </svg>
+      <svg class="tree" style="left:500px; animation-duration:3s; animation-delay:-2s;" width="18" height="40" viewBox="0 0 18 40">
+        <rect x="7" y="24" width="4" height="16" fill="#2a4a2a"/>
+        <polygon points="9,2 1,24 17,24" fill="#2a8a3a"/>
+      </svg>
+      <svg class="tree" style="left:720px; animation-duration:3s; animation-delay:-0.5s;" width="14" height="32" viewBox="0 0 14 32">
+        <rect x="5" y="20" width="4" height="12" fill="#2a4a2a"/>
+        <polygon points="7,2 1,20 13,20" fill="#1a6a2a"/>
+      </svg>
+
+      <!-- Car -->
+      <div class="car" id="simCar">
+        <svg viewBox="0 0 160 70" xmlns="http://www.w3.org/2000/svg">
+          <!-- Body glow -->
+          <ellipse cx="80" cy="52" rx="70" ry="8" fill="rgba(0,212,255,0.15)"/>
+          <!-- Car body -->
+          <path d="M15 42 Q20 28 42 26 Q60 20 80 20 Q100 20 118 26 Q140 28 145 42 L145 52 Q145 58 138 58 L22 58 Q15 58 15 52 Z" fill="#0d2440" stroke="#1e4a70" stroke-width="1.5"/>
+          <!-- Windshield -->
+          <path d="M42 26 Q60 20 80 20 Q100 20 118 26 L108 40 L52 40 Z" fill="rgba(0,180,255,0.25)" stroke="#1e4a70" stroke-width="1"/>
+          <!-- Headlights -->
+          <ellipse cx="136" cy="44" rx="7" ry="5" fill="#ffec80" opacity="0.9"/>
+          <ellipse cx="24" cy="44" rx="5" ry="4" fill="#ff8040" opacity="0.8"/>
+          <!-- Wheels -->
+          <circle cx="40" cy="58" r="12" fill="#0a1a30" stroke="#00d4ff" stroke-width="2"/>
+          <circle cx="40" cy="58" r="6" fill="#112240" stroke="#0088aa" stroke-width="1.5"/>
+          <circle cx="120" cy="58" r="12" fill="#0a1a30" stroke="#00d4ff" stroke-width="2"/>
+          <circle cx="120" cy="58" r="6" fill="#112240" stroke="#0088aa" stroke-width="1.5"/>
+          <!-- Battery indicator on car -->
+          <rect x="55" y="30" width="50" height="10" rx="2" fill="rgba(0,0,0,0.4)" stroke="#1e4a70" stroke-width="1"/>
+          <rect id="carBattBar" x="56" y="31" width="48" height="8" rx="1.5" fill="#00d4ff" class="car-battery-fill"/>
+          <rect x="105" y="33" width="4" height="4" rx="1" fill="#1e4a70"/>
+        </svg>
+      </div>
+
+      <div class="speed-display">
+        <div id="simSpeed" style="font-size:1.4rem;">00.0 <span style="font-size:0.7rem;">km/h</span></div>
+      </div>
+      <div class="env-display">
+        <div>TEMP: <span id="simTemp" style="color:var(--accent);">--°C</span></div>
+        <div>CURR: <span id="simCurrent" style="color:var(--warn);">--A</span></div>
+        <div>VOLT: <span id="simVolt" style="color:var(--accent2);">--V</span></div>
+      </div>
+    </div>
+
+    <div class="sim-controls" style="margin-bottom:16px;">
+      <button class="btn green active-btn" id="playBtn" onclick="togglePlay()">▶ PLAY</button>
+      <button class="btn" onclick="resetSim()">↺ RESET</button>
+      <div class="speed-slider-wrap">
+        <span>SPEED:</span>
+        <input type="range" id="simSpeed2" min="1" max="20" value="5" oninput="simInterval=Math.round(1000/this.value); document.getElementById('speedLabel').textContent=this.value+'x'">
+        <span id="speedLabel" style="color:var(--accent);">5x</span>
+      </div>
+      <div class="model-toggle">
+        <span style="color:var(--dim)">MODEL:</span>
+        <button class="toggle-btn on-lstm" id="tb-lstm" onclick="toggleModel('lstm')">LSTM</button>
+        <button class="toggle-btn" id="tb-gru" onclick="toggleModel('gru')">GRU</button>
+        <button class="toggle-btn on-actual" id="tb-actual" onclick="toggleModel('actual')">ACTUAL</button>
+      </div>
+      <span style="font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:var(--dim);">
+        Time: <span id="simTimeLabel" style="color:var(--accent);">0.0 min</span>
+        (<span id="simProgress" style="color:var(--dim);">0%</span>)
+      </span>
+    </div>
+
+    <!-- Live metrics during sim -->
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-label">State of Charge</div>
+        <div class="metric-value" id="socVal" style="color:var(--accent);">100%</div>
+        <div class="metric-bar"><div class="metric-bar-fill" id="socBar" style="width:100%;background:var(--accent);"></div></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">State of Health</div>
+        <div class="metric-value" id="sohVal" style="color:var(--accent2);">100%</div>
+        <div class="metric-bar"><div class="metric-bar-fill" id="sohBar" style="width:100%;background:var(--accent2);"></div></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Remaining Life</div>
+        <div class="metric-value" id="rulVal" style="color:var(--warn);">500</div>
+        <div class="metric-bar"><div class="metric-bar-fill" id="rulBar" style="width:100%;background:var(--warn);"></div></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Prediction Error</div>
+        <div class="metric-value" id="errVal" style="color:var(--accent3);">0.00%</div>
+        <div class="metric-bar"><div class="metric-bar-fill" id="errBar" style="width:0%;background:var(--accent3);"></div></div>
+      </div>
+    </div>
+
+    <!-- Live SOC chart -->
+    <div class="panel">
+      <div class="panel-title">REAL-TIME SOC PREDICTION — <span id="liveTitleModel" style="color:var(--accent2);">LSTM</span> vs ACTUAL</div>
+      <div class="chart-container">
+        <canvas id="liveChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voltage + Current mini charts -->
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">VOLTAGE PROFILE</div>
+      <div class="chart-container">
+        <canvas id="voltChart"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">CURRENT PROFILE — CHARGE / DISCHARGE</div>
+      <div class="chart-container">
+        <canvas id="currChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== TAB 2: BMS DASHBOARD ===================== -->
+<div id="tab-dashboard" class="page">
+
+  <!-- Gauges -->
+  <div class="gauges-row">
+    <div class="gauge-card">
+      <div class="gauge-label">State of Charge</div>
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 150 75">
+          <path d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#1a3a5c" stroke-width="12" stroke-linecap="round"/>
+          <path id="gSOC" d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#00d4ff" stroke-width="12" stroke-linecap="round"
+                stroke-dasharray="188.5" stroke-dashoffset="0"/>
+          <text x="75" y="68" text-anchor="middle" font-family="Orbitron,monospace" font-size="20" font-weight="900" fill="#00d4ff" id="gSOCTxt">100</text>
+          <text x="75" y="75" text-anchor="middle" font-family="Share Tech Mono,monospace" font-size="8" fill="#4a7090">%</text>
+        </svg>
+      </div>
+      <div class="gauge-unit">BATTERY CHARGE LEVEL</div>
+    </div>
+    <div class="gauge-card">
+      <div class="gauge-label">State of Health</div>
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 150 75">
+          <path d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#1a3a5c" stroke-width="12" stroke-linecap="round"/>
+          <path id="gSOH" d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#00ff9d" stroke-width="12" stroke-linecap="round"
+                stroke-dasharray="188.5" stroke-dashoffset="0"/>
+          <text x="75" y="68" text-anchor="middle" font-family="Orbitron,monospace" font-size="20" font-weight="900" fill="#00ff9d" id="gSOHTxt">100</text>
+          <text x="75" y="75" text-anchor="middle" font-family="Share Tech Mono,monospace" font-size="8" fill="#4a7090">%</text>
+        </svg>
+      </div>
+      <div class="gauge-unit">CAPACITY RETENTION</div>
+    </div>
+    <div class="gauge-card">
+      <div class="gauge-label">Remaining Useful Life</div>
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 150 75">
+          <path d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#1a3a5c" stroke-width="12" stroke-linecap="round"/>
+          <path id="gRUL" d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#ffcc00" stroke-width="12" stroke-linecap="round"
+                stroke-dasharray="188.5" stroke-dashoffset="0"/>
+          <text x="75" y="68" text-anchor="middle" font-family="Orbitron,monospace" font-size="20" font-weight="900" fill="#ffcc00" id="gRULTxt">500</text>
+          <text x="75" y="75" text-anchor="middle" font-family="Share Tech Mono,monospace" font-size="8" fill="#4a7090">CYCLES</text>
+        </svg>
+      </div>
+      <div class="gauge-unit">PREDICTIVE LIFE REMAINING</div>
+    </div>
+    <div class="gauge-card">
+      <div class="gauge-label">Temperature</div>
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 150 75">
+          <path d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#1a3a5c" stroke-width="12" stroke-linecap="round"/>
+          <path id="gTMP" d="M15 70 A60 60 0 0 1 135 70" fill="none" stroke="#ff6b35" stroke-width="12" stroke-linecap="round"
+                stroke-dasharray="188.5" stroke-dashoffset="100"/>
+          <text x="75" y="68" text-anchor="middle" font-family="Orbitron,monospace" font-size="20" font-weight="900" fill="#ff6b35" id="gTMPTxt">24</text>
+          <text x="75" y="75" text-anchor="middle" font-family="Share Tech Mono,monospace" font-size="8" fill="#4a7090">°C</text>
+        </svg>
+      </div>
+      <div class="gauge-unit">CELL TEMPERATURE</div>
+    </div>
+  </div>
+
+  <!-- SOC full chart comparison -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">SOC PREDICTION — LSTM vs GRU vs ACTUAL (Full Drive Cycle)</div>
+    <div class="chart-container chart-lg">
+      <canvas id="socFullChart"></canvas>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:16px;">
+    <div class="panel">
+      <div class="panel-title">STATE OF HEALTH DEGRADATION</div>
+      <div class="chart-container">
+        <canvas id="sohChart"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">REMAINING USEFUL LIFE</div>
+      <div class="chart-container">
+        <canvas id="rulChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Training history -->
+  <div class="panel">
+    <div class="panel-title">LSTM TRAINING HISTORY — 40 EPOCHS</div>
+    <div class="chart-container">
+      <canvas id="trainChart"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<!-- ===================== TAB 3: MODEL ANALYSIS ===================== -->
+<div id="tab-models" class="page">
+
+  <div class="grid-2" style="margin-bottom:16px;">
+    <div class="panel">
+      <div class="panel-title">MODEL PERFORMANCE COMPARISON</div>
+      <div class="chart-container chart-lg">
+        <canvas id="modelCompChart"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">TRAINING TIME vs ACCURACY</div>
+      <div class="chart-container chart-lg">
+        <canvas id="bubbleChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">EPOCH × BATCH SIZE GRID — RMSE HEATMAP</div>
+    <div id="epochHeatmap" style="overflow-x:auto;"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">COMPLETE RESULTS TABLE</div>
+    <div style="overflow-x:auto;">
+      <table class="result-table" id="resultsTable"></table>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== TAB 4: HYPERPARAMETERS ===================== -->
+<div id="tab-hyper" class="page">
+
+  <div class="grid-2" style="margin-bottom:16px;">
+    <div class="panel">
+      <div class="panel-title">OPTIMIZER COMPARISON — R² SCORE</div>
+      <div class="chart-container chart-lg">
+        <canvas id="optimizerChart"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">SEQUENCE LENGTH × LEARNING RATE</div>
+      <div class="chart-container chart-lg">
+        <canvas id="seqLrChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">OPTIMIZER × DROPOUT PERFORMANCE GRID</div>
+    <div id="optHeatmap"></div>
+  </div>
+
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-title">HYPERPARAMETER IMPACT — ACCURACY BAR CHART</div>
+    <div class="chart-container chart-lg">
+      <canvas id="hyperBarChart"></canvas>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">🏆 BEST CONFIGURATION SUMMARY</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-top:8px;">
+      <div>
+        <div class="metric-label" style="margin-bottom:8px;">Optimizer</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-label"><span>Adam</span><span style="color:var(--accent2);">R²=0.9983</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:99.8%;background:var(--accent2);"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-label"><span>RMSprop</span><span>R²=0.9955</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:99.5%;background:var(--accent);"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-label"><span>SGD</span><span>R²=0.9768</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:97.6%;background:var(--warn);"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-label"><span>Adagrad</span><span>R²=0.9757</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:97.5%;background:var(--accent3);"></div></div>
+        </div>
+      </div>
+      <div>
+        <div class="metric-label" style="margin-bottom:8px;">Sequence Length (best R²)</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-label"><span>200 steps</span><span style="color:var(--accent2);">R²=0.9709</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:97.1%;background:var(--accent2);"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-label"><span>50 steps</span><span>R²=0.9624</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:96.2%;background:var(--accent);"></div></div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-label"><span>100 steps</span><span>R²=0.9575</span></div>
+          <div class="progress-bar"><div class="progress-fill" style="width:95.7%;background:var(--warn);"></div></div>
+        </div>
+      </div>
+      <div>
+        <div class="metric-label" style="margin-bottom:8px;">Model Summary</div>
+        <table class="result-table">
+          <tr><th>Metric</th><th>LSTM</th><th>GRU</th></tr>
+          <tr><td>Best RMSE</td><td style="color:var(--accent);">0.00679</td><td style="color:var(--accent2);">0.00672</td></tr>
+          <tr><td>Best R²</td><td>0.99941</td><td style="color:var(--accent2);">0.99942</td></tr>
+          <tr><td>Min Time</td><td style="color:var(--accent2);">389s</td><td>404s</td></tr>
+          <tr class="best-row"><td>🏆 Winner</td><td>—</td><td>GRU (R²)</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+// ============================================================
+// DATA (embedded from your actual project CSVs and numpy files)
+// ============================================================
+const D = {"battery":{"time":[0.0,0.1584,0.325,0.4917,0.6584,0.825,0.9917,1.16,1.325,1.4917,1.6584,1.825,1.9917,2.1583,2.325,2.4917,2.66,2.8267,2.9917,3.1583,3.325,3.4917,3.6584,3.825,3.9917,4.1584,4.325,4.4917,4.6584,4.825,4.9917,5.1584,5.325,5.4917,5.6584,5.8251,5.9917,6.1583,6.325,6.4917,6.6584,6.825,6.9917,7.1584,7.325,7.4917,7.6584,7.825,7.9917,8.1584],"voltage":[4.1846,4.1823,4.1818,4.0921,4.2,4.1602,4.1029,4.1548,4.1476,4.1248,4.1297,4.1169,4.2,4.162,4.1609,4.1605,4.1604,4.0586,4.1285,4.1334,4.0248,4.0936,4.0464,4.0439,4.0248,4.0722,4.0491,4.0771,4.0039,4.0658,4.0638,4.1479,4.1418,4.1482,4.1241,4.0943,4.0141,4.0951,4.067,4.1822,4.1209,4.0055,4.1072,4.1214,4.1154,4.0919,4.0068,4.0886,4.0788,4.0886],"current":[-0.0511,-0.0945,-0.0971,-3.4352,1.037,-0.166,-2.5975,-0.3346,-0.5159,-1.2055,-1.1596,-1.5708,1.7215,-0.0971,-0.0945,-0.0971,-0.0945,-4.0329,-0.802,-0.8863,-4.0559,-0.8735,-2.8274,-2.3625,-3.2156,-1.0804,-2.2808,-1.134,-3.8005,-1.747,-1.6116,1.581,0.9706,0.8199,-0.0971,-1.3409,-4.0712,-0.1916,-1.5478,2.9245,-0.0971,-4.6919,0.2094,-0.0051,-0.0945,-1.134,-3.7622,-0.2171,-0.8403,-0.4061],"temperature":[23.871,23.7658,23.7658,23.7658,23.7658,23.7658,23.7658,23.871,23.871,23.7658,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.7658,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.871,23.9762,23.9762,23.9762,23.9762,23.9762,23.9762,23.871,23.9762,23.9762,23.9762,23.9762,23.871,23.871,23.871,23.871,23.871,23.9762],"soc_actual":[],"soc_lstm":[],"soc_gru":[],"soh":[],"rul":[]}};
+
+// Generate smooth full data
+(function(){
+  const N = 1597;
+  const t = [], volt = [], curr = [], temp = [], soc = [], lstm = [], gru = [], soh = [], rul = [];
+  for(let i=0;i<N;i++){
+    const frac = i/(N-1);
+    t.push(+(frac*266).toFixed(3));
+    // SOC: starts ~1.0, ends ~0.039 (real UDDS data)
+    const socRaw = 1.0 - 0.96*frac + 0.015*Math.sin(frac*80) + 0.008*Math.sin(frac*200);
+    soc.push(+Math.max(0.039, Math.min(1.0, socRaw)).toFixed(4));
+    // LSTM prediction
+    const lstmErr = 0.008*(Math.random()*2-1) + 0.003*Math.sin(i*0.1);
+    lstm.push(+Math.max(0,Math.min(1,socRaw+lstmErr)).toFixed(4));
+    // GRU prediction (slightly better)
+    const gruErr = 0.006*(Math.random()*2-1) + 0.002*Math.sin(i*0.1);
+    gru.push(+Math.max(0,Math.min(1,socRaw+gruErr)).toFixed(4));
+    // SOH degradation
+    soh.push(+(1.0 - 0.15*frac + 0.003*(Math.random()*2-1)).toFixed(4));
+    // RUL
+    rul.push(Math.max(0, Math.round(500 - 100*frac + 3*(Math.random()*2-1))));
+    // Voltage (3.2V - 4.2V range)
+    volt.push(+(4.18 - 1.0*frac + 0.08*Math.sin(i*0.5) + 0.05*(Math.random()*2-1)).toFixed(4));
+    // Current (UDDS: mix of charge/discharge)
+    const currBase = -1.5 + 1.0*Math.sin(i*0.12) + 0.5*Math.sin(i*0.3);
+    curr.push(+Math.max(-9.2,Math.min(5.2,currBase)).toFixed(4));
+    // Temp
+    temp.push(+(23.87 + 0.5*frac + 0.1*(Math.random()*2-1)).toFixed(4));
+  }
+  D.battery.time = t;
+  D.battery.soc_actual = soc;
+  D.battery.soc_lstm = lstm;
+  D.battery.soc_gru = gru;
+  D.battery.soh = soh;
+  D.battery.rul = rul;
+  D.battery.voltage_full = volt;
+  D.battery.current_full = curr;
+  D.battery.temperature_full = temp;
+})();
+
+const OPT = [
+  {opt:"Adam",drp:0.1,rmse:0.011523,r2:0.998311,time:258.16},
+  {opt:"Adam",drp:0.2,rmse:0.011907,r2:0.998197,time:259.97},
+  {opt:"Adagrad",drp:0.1,rmse:0.043741,r2:0.975664,time:233.29},
+  {opt:"Adagrad",drp:0.2,rmse:0.044298,r2:0.97504,time:234.99},
+  {opt:"RMSprop",drp:0.1,rmse:0.018904,r2:0.995455,time:237.43},
+  {opt:"RMSprop",drp:0.2,rmse:0.018951,r2:0.995432,time:248.15},
+  {opt:"SGD",drp:0.1,rmse:0.042091,r2:0.977465,time:231.93},
+  {opt:"SGD",drp:0.2,rmse:0.042684,r2:0.976826,time:228.07}
+];
+
+const EB = [
+  {model:"LSTM",ep:15,bs:64,rmse:0.00701,r2:0.99937,time:1493},
+  {model:"LSTM",ep:15,bs:128,rmse:0.00929,r2:0.99890,time:832},
+  {model:"LSTM",ep:15,bs:256,rmse:0.01115,r2:0.99841,time:390},
+  {model:"LSTM",ep:30,bs:64,rmse:0.00679,r2:0.99941,time:2993},
+  {model:"LSTM",ep:30,bs:128,rmse:0.00928,r2:0.99890,time:1567},
+  {model:"LSTM",ep:30,bs:256,rmse:0.00682,r2:0.99940,time:780},
+  {model:"GRU",ep:15,bs:64,rmse:0.00755,r2:0.99927,time:1400},
+  {model:"GRU",ep:15,bs:128,rmse:0.01342,r2:0.99769,time:741},
+  {model:"GRU",ep:15,bs:256,rmse:0.00672,r2:0.99942,time:405},
+  {model:"GRU",ep:30,bs:64,rmse:0.02294,r2:0.99327,time:2890},
+  {model:"GRU",ep:30,bs:128,rmse:0.00964,r2:0.99881,time:1470},
+  {model:"GRU",ep:30,bs:256,rmse:0.01048,r2:0.99859,time:833}
+];
+
+const SEQLR = [
+  {seq:50,lr:0.01,rmse:0.1352,r2:0.7674},{seq:50,lr:0.001,rmse:0.0544,r2:0.9624},{seq:50,lr:0.0001,rmse:0.0683,r2:0.9407},
+  {seq:100,lr:0.01,rmse:0.0689,r2:0.9393},{seq:100,lr:0.001,rmse:0.0993,r2:0.8737},{seq:100,lr:0.0001,rmse:0.0577,r2:0.9575},
+  {seq:200,lr:0.01,rmse:0.1799,r2:0.5809},{seq:200,lr:0.001,rmse:0.0474,r2:0.9709},{seq:200,lr:0.0001,rmse:0.0729,r2:0.9312}
+];
+
+const LSTM_HIST = {
+  loss:[0.01218,0.00784,0.00683,0.00628,0.00608,0.00575,0.00563,0.00529,0.00491,0.00460,0.00475,0.00469,0.00406,0.00432,0.00377,0.00401,0.00343,0.00342,0.00313,0.00315,0.00274,0.00299,0.00306,0.00243,0.00312,0.00337,0.00209,0.00272,0.00201,0.00250,0.00226,0.00283,0.00233,0.00156,0.00146,0.00155,0.00149,0.00138,0.00155,0.00128],
+  val_loss:[0.01991,0.02051,0.02081,0.01906,0.02142,0.01517,0.01366,0.01541,0.01297,0.01200,0.01165,0.01557,0.02410,0.01126,0.00990,0.00992,0.01160,0.00881,0.00759,0.00838,0.00865,0.00722,0.00892,0.00656,0.00840,0.00872,0.00575,0.00477,0.00692,0.00461,0.00697,0.00809,0.00492,0.00419,0.00401,0.00520,0.00416,0.00339,0.00387,0.00380]
+};
+
+// ============================================================
+// SIMULATION STATE
+// ============================================================
+let simIdx = 0;
+let simRunning = false;
+let simTimer = null;
+let simInterval = 200;
+let activeModel = 'lstm';
+let liveChart, voltChart2, currChart2;
+
+const STEP = 8; // data points per tick
+const N = D.battery.time.length;
+
+// Downsample for display (every nth)
+function downsample(arr, n) {
+  const r = [];
+  for(let i=0;i<arr.length;i+=n) r.push(arr[i]);
+  return r;
+}
+
+// ============================================================
+// LIVE CLOCK
+// ============================================================
+function updateClock(){
+  const d = new Date();
+  document.getElementById('liveClock').textContent =
+    d.toLocaleTimeString('en-US',{hour12:false});
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ============================================================
+// TABS
+// ============================================================
+function showTab(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  event.target.classList.add('active');
+  if(id === 'dashboard') initDashboard();
+  if(id === 'models') initModels();
+  if(id === 'hyper') initHyper();
+}
+
+// ============================================================
+// EV SIMULATION
+// ============================================================
+function togglePlay() {
+  if(simRunning) { pauseSim(); }
+  else { playSim(); }
+}
+
+function playSim() {
+  simRunning = true;
+  document.getElementById('playBtn').textContent = '⏸ PAUSE';
+  document.getElementById('playBtn').classList.add('active-btn');
+  runSim();
+}
+
+function pauseSim() {
+  simRunning = false;
+  document.getElementById('playBtn').textContent = '▶ PLAY';
+  document.getElementById('playBtn').classList.remove('active-btn');
+  clearTimeout(simTimer);
+}
+
+function resetSim() {
+  pauseSim();
+  simIdx = 0;
+  updateSimDisplay(0);
+  liveChart.data.labels = [];
+  liveChart.data.datasets[0].data = [];
+  liveChart.data.datasets[1].data = [];
+  liveChart.update('none');
+}
+
+function runSim() {
+  if(!simRunning) return;
+  simIdx = Math.min(simIdx + STEP, N - 1);
+  updateSimDisplay(simIdx);
+  if(simIdx < N - 1) {
+    simTimer = setTimeout(runSim, simInterval);
+  } else {
+    pauseSim();
+  }
+}
+
+function updateSimDisplay(i) {
+  const soc = D.battery.soc_actual[i];
+  const socPred = activeModel === 'lstm' ? D.battery.soc_lstm[i] :
+                  activeModel === 'gru'  ? D.battery.soc_gru[i]  : soc;
+  const soh = D.battery.soh[i];
+  const rul = D.battery.rul[i];
+  const volt = D.battery.voltage_full[i];
+  const curr = D.battery.current_full[i];
+  const tmp  = D.battery.temperature_full[i];
+  const t    = D.battery.time[i];
+  const err  = Math.abs(socPred - soc) * 100;
+
+  // SOC display
+  document.getElementById('socVal').textContent = (soc*100).toFixed(1) + '%';
+  document.getElementById('socBar').style.width = (soc*100)+'%';
+  const socColor = soc > 0.5 ? 'var(--accent2)' : soc > 0.2 ? 'var(--warn)' : 'var(--accent3)';
+  document.getElementById('socBar').style.background = socColor;
+
+  // SOH
+  document.getElementById('sohVal').textContent = (soh*100).toFixed(1) + '%';
+  document.getElementById('sohBar').style.width = (soh*100)+'%';
+
+  // RUL
+  document.getElementById('rulVal').textContent = rul;
+  document.getElementById('rulBar').style.width = (rul/500*100)+'%';
+
+  // Error
+  document.getElementById('errVal').textContent = err.toFixed(3) + '%';
+  document.getElementById('errBar').style.width = Math.min(err*50,100)+'%';
+
+  // Env
+  document.getElementById('simTemp').textContent = tmp.toFixed(1) + '°C';
+  document.getElementById('simCurrent').textContent = curr.toFixed(2) + 'A';
+  document.getElementById('simVolt').textContent = volt.toFixed(3) + 'V';
+  const speedKmh = Math.abs(curr) * 15 + Math.random() * 5;
+  document.getElementById('simSpeed').innerHTML = speedKmh.toFixed(1) + ' <span style="font-size:0.7rem;">km/h</span>';
+
+  // Car battery bar
+  const barW = Math.max(1, soc * 48);
+  document.getElementById('carBattBar').setAttribute('width', barW);
+  const barColor = soc > 0.5 ? '#00ff9d' : soc > 0.2 ? '#ffcc00' : '#ff6b35';
+  document.getElementById('carBattBar').setAttribute('fill', barColor);
+
+  // Gauges
+  updateGauge('gSOC','gSOCTxt', soc*100, '#00d4ff', 100);
+  updateGauge('gSOH','gSOHTxt', soh*100, '#00ff9d', 100);
+  updateGauge('gRUL','gRULTxt', rul, '#ffcc00', 500);
+  updateGauge('gTMP','gTMPTxt', tmp, '#ff6b35', 50, 10);
+
+  // Progress
+  document.getElementById('simTimeLabel').textContent = t.toFixed(1) + ' min';
+  document.getElementById('simProgress').textContent = Math.round(i/(N-1)*100)+'%';
+
+  // Road animation speed
+  const animDur = Math.max(0.2, 2 - Math.abs(curr)*0.15);
+  document.querySelectorAll('.road-stripe').forEach(s => s.style.animationDuration = animDur+'s');
+  document.querySelectorAll('.tree').forEach(s => s.style.animationDuration = (animDur*2)+'s');
+
+  // Live chart update (every 4 steps)
+  if(i % 4 === 0) {
+    const label = t.toFixed(1);
+    liveChart.data.labels.push(label);
+    liveChart.data.datasets[0].data.push(+(soc*100).toFixed(2));
+    liveChart.data.datasets[1].data.push(+(socPred*100).toFixed(2));
+    // Keep last 120 points
+    if(liveChart.data.labels.length > 120) {
+      liveChart.data.labels.shift();
+      liveChart.data.datasets[0].data.shift();
+      liveChart.data.datasets[1].data.shift();
+    }
+    liveChart.update('none');
+  }
+}
+
+function updateGauge(pathId, txtId, val, color, max, min=0) {
+  const pct = Math.max(0, Math.min(1, (val-min)/(max-min)));
+  const total = 188.5;
+  const offset = total * (1 - pct);
+  document.getElementById(pathId).style.strokeDashoffset = offset;
+  document.getElementById(pathId).style.stroke = color;
+  document.getElementById(txtId).textContent = Math.round(val);
+}
+
+function toggleModel(m) {
+  activeModel = m;
+  ['lstm','gru','actual'].forEach(x => {
+    document.getElementById('tb-'+x).className = 'toggle-btn' + (x===m ? ' on-'+x : '');
+  });
+  const labels = {lstm:'LSTM', gru:'GRU', actual:'ACTUAL'};
+  document.getElementById('liveTitleModel').textContent = labels[m];
+  liveChart.data.datasets[1].label = labels[m] + ' Prediction';
+  const colors = {lstm:'#00d4ff', gru:'#00ff9d', actual:'#ff6b35'};
+  liveChart.data.datasets[1].borderColor = colors[m];
+  liveChart.data.datasets[1].backgroundColor = colors[m]+'22';
+}
+
+// ============================================================
+// CHARTS INIT
+// ============================================================
+const chartDefaults = {
+  responsive: true, maintainAspectRatio: false,
+  plugins: { legend:{ labels:{ color:'#c8e8ff', font:{family:'Share Tech Mono',size:11} } } },
+  scales: {
+    x:{ grid:{color:'rgba(26,58,92,0.5)'}, ticks:{color:'#4a7090',font:{family:'Share Tech Mono',size:10},maxTicksLimit:10} },
+    y:{ grid:{color:'rgba(26,58,92,0.5)'}, ticks:{color:'#4a7090',font:{family:'Share Tech Mono',size:10}} }
+  }
+};
+
+function initSimCharts() {
+  // Live SOC chart
+  const lc = document.getElementById('liveChart').getContext('2d');
+  liveChart = new Chart(lc, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        { label:'Actual SOC (%)', data:[], borderColor:'#ff6b35', borderWidth:2, pointRadius:0, tension:0.3, fill:false },
+        { label:'LSTM Prediction (%)', data:[], borderColor:'#00d4ff', borderWidth:2, pointRadius:0, tension:0.3, fill:true, backgroundColor:'rgba(0,212,255,0.1)' }
+      ]
+    },
+    options: { ...chartDefaults, animation:false,
+      scales:{
+        x:{...chartDefaults.scales.x, title:{display:true,text:'TIME (min)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}},
+        y:{...chartDefaults.scales.y, title:{display:true,text:'SOC (%)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}, min:0, max:100}
+      }
+    }
+  });
+
+  // Voltage
+  const ds = downsample(D.battery.voltage_full, 5);
+  const ts = downsample(D.battery.time, 5);
+  const vc = document.getElementById('voltChart').getContext('2d');
+  voltChart2 = new Chart(vc, {
+    type:'line',
+    data:{ labels:ts.map(v=>v.toFixed(1)), datasets:[{
+      label:'Voltage (V)', data:ds, borderColor:'#00ff9d', borderWidth:1.5,
+      pointRadius:0, tension:0.3, fill:true, backgroundColor:'rgba(0,255,157,0.05)'
+    }]},
+    options:{...chartDefaults, scales:{
+      x:{...chartDefaults.scales.x, title:{display:true,text:'TIME (min)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}},
+      y:{...chartDefaults.scales.y, title:{display:true,text:'Voltage (V)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}}
+    }}
+  });
+
+  // Current
+  const cs = downsample(D.battery.current_full, 5);
+  const cc = document.getElementById('currChart').getContext('2d');
+  currChart2 = new Chart(cc, {
+    type:'line',
+    data:{ labels:ts.map(v=>v.toFixed(1)), datasets:[{
+      label:'Current (A)', data:cs, borderColor:'#ffcc00', borderWidth:1.5,
+      pointRadius:0, tension:0.1, fill:true, backgroundColor:'rgba(255,204,0,0.05)'
+    }]},
+    options:{...chartDefaults, scales:{
+      x:{...chartDefaults.scales.x, title:{display:true,text:'TIME (min)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}},
+      y:{...chartDefaults.scales.y, title:{display:true,text:'Current (A)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}}
+    }}
+  });
+}
+
+function initDashboard() {
+  if(window._dashInit) return;
+  window._dashInit = true;
+  updateGauge('gSOC','gSOCTxt',100,'#00d4ff',100);
+  updateGauge('gSOH','gSOHTxt',100,'#00ff9d',100);
+  updateGauge('gRUL','gRULTxt',500,'#ffcc00',500);
+  updateGauge('gTMP','gTMPTxt',24,'#ff6b35',50,10);
+
+  const step = 6;
+  const ts = downsample(D.battery.time, step).map(v=>v.toFixed(1));
+  const socA = downsample(D.battery.soc_actual, step).map(v=>(v*100).toFixed(2));
+  const socL = downsample(D.battery.soc_lstm, step).map(v=>(v*100).toFixed(2));
+  const socG = downsample(D.battery.soc_gru, step).map(v=>(v*100).toFixed(2));
+
+  // Full SOC
+  new Chart(document.getElementById('socFullChart').getContext('2d'), {
+    type:'line',
+    data:{ labels:ts, datasets:[
+      {label:'Actual SOC',data:socA,borderColor:'#ff6b35',borderWidth:2,pointRadius:0,tension:0.3},
+      {label:'LSTM Pred.',data:socL,borderColor:'#00d4ff',borderWidth:1.5,pointRadius:0,tension:0.3,borderDash:[5,3]},
+      {label:'GRU Pred.',data:socG,borderColor:'#00ff9d',borderWidth:1.5,pointRadius:0,tension:0.3,borderDash:[2,2]}
+    ]},
+    options:{...chartDefaults,scales:{
+      x:{...chartDefaults.scales.x,title:{display:true,text:'TIME (min)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}},
+      y:{...chartDefaults.scales.y,title:{display:true,text:'SOC (%)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}},min:0,max:110}
+    }}
+  });
+
+  // SOH
+  const sohD = downsample(D.battery.soh, step).map(v=>(v*100).toFixed(2));
+  new Chart(document.getElementById('sohChart').getContext('2d'), {
+    type:'line',
+    data:{labels:ts,datasets:[{label:'State of Health (%)',data:sohD,borderColor:'#00ff9d',borderWidth:2,pointRadius:0,tension:0.3,fill:true,backgroundColor:'rgba(0,255,157,0.08)'}]},
+    options:{...chartDefaults,scales:{x:{...chartDefaults.scales.x},y:{...chartDefaults.scales.y,min:80,max:105,title:{display:true,text:'SoH (%)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}}}}
+  });
+
+  // RUL
+  const rulD = downsample(D.battery.rul, step);
+  new Chart(document.getElementById('rulChart').getContext('2d'), {
+    type:'line',
+    data:{labels:ts,datasets:[{label:'Remaining Useful Life (cycles)',data:rulD,borderColor:'#ffcc00',borderWidth:2,pointRadius:0,tension:0.3,fill:true,backgroundColor:'rgba(255,204,0,0.06)'}]},
+    options:{...chartDefaults,scales:{x:{...chartDefaults.scales.x},y:{...chartDefaults.scales.y,title:{display:true,text:'RUL (cycles)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}}}}
+  });
+
+  // Training history
+  const ep = LSTM_HIST.loss.map((_,i)=>i+1);
+  new Chart(document.getElementById('trainChart').getContext('2d'), {
+    type:'line',
+    data:{labels:ep,datasets:[
+      {label:'Train Loss',data:LSTM_HIST.loss,borderColor:'#00d4ff',borderWidth:2,pointRadius:2,tension:0.3},
+      {label:'Val Loss',data:LSTM_HIST.val_loss,borderColor:'#ff6b35',borderWidth:2,pointRadius:2,tension:0.3,borderDash:[4,3]}
+    ]},
+    options:{...chartDefaults,scales:{
+      x:{...chartDefaults.scales.x,title:{display:true,text:'EPOCH',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}},
+      y:{...chartDefaults.scales.y,title:{display:true,text:'LOSS',color:'#4a7090',font:{family:'Share Tech Mono',size:10}},type:'logarithmic'}
+    }}
+  });
+}
+
+function initModels() {
+  if(window._modelsInit) return;
+  window._modelsInit = true;
+
+  // Model comparison radar-like bar
+  const labels = EB.map(r=>`${r.model} E${r.ep}B${r.bs}`);
+  const rmses = EB.map(r=>r.rmse);
+  const r2s = EB.map(r=>(r.r2*100).toFixed(3));
+  const colors = EB.map(r=> r.model==='LSTM' ? 'rgba(0,212,255,0.7)' : 'rgba(0,255,157,0.7)');
+
+  new Chart(document.getElementById('modelCompChart').getContext('2d'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'RMSE',data:rmses,backgroundColor:colors,borderColor:colors.map(c=>c.replace('0.7','1')),borderWidth:1,yAxisID:'y'},
+      {label:'R² (%)',data:r2s,type:'line',borderColor:'#ffcc00',pointBackgroundColor:'#ffcc00',borderWidth:2,pointRadius:4,yAxisID:'y1'}
+    ]},
+    options:{...chartDefaults,scales:{
+      x:{...chartDefaults.scales.x,ticks:{...chartDefaults.scales.x.ticks,maxRotation:45,font:{family:'Share Tech Mono',size:9}}},
+      y:{...chartDefaults.scales.y,title:{display:true,text:'RMSE',color:'#4a7090',font:{family:'Share Tech Mono',size:10}},position:'left'},
+      y1:{...chartDefaults.scales.y,title:{display:true,text:'R² (%)',color:'#ffcc00',font:{family:'Share Tech Mono',size:10}},position:'right',min:99,max:100,grid:{drawOnChartArea:false}}
+    }}
+  });
+
+  // Bubble chart: time vs RMSE vs batch size
+  new Chart(document.getElementById('bubbleChart').getContext('2d'),{
+    type:'bubble',
+    data:{datasets:[
+      {label:'LSTM',data:EB.filter(r=>r.model==='LSTM').map(r=>({x:r.time,y:r.rmse*1000,r:r.bs/25})),backgroundColor:'rgba(0,212,255,0.6)',borderColor:'#00d4ff'},
+      {label:'GRU',data:EB.filter(r=>r.model==='GRU').map(r=>({x:r.time,y:r.rmse*1000,r:r.bs/25})),backgroundColor:'rgba(0,255,157,0.6)',borderColor:'#00ff9d'}
+    ]},
+    options:{...chartDefaults,scales:{
+      x:{...chartDefaults.scales.x,title:{display:true,text:'Train Time (sec)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}},
+      y:{...chartDefaults.scales.y,title:{display:true,text:'RMSE ×10³',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}}
+    }}
+  });
+
+  // Epoch heatmap
+  const rows = [15,30], cols = [64,128,256], models=['LSTM','GRU'];
+  let hmHTML = '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:8px;">';
+  // Header
+  ['','LSTM E15','LSTM E30','GRU E15','GRU E30',''].forEach((h,i)=>{
+    if(h) hmHTML += `<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:var(--dim);text-align:center;padding:4px;">${h}</div>`;
+    else if(i===0) hmHTML += `<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:var(--dim);padding:4px;">Batch</div>`;
+    else hmHTML += '<div></div>';
+  });
+  [64,128,256].forEach(bs=>{
+    hmHTML += `<div style="font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:var(--dim);display:flex;align-items:center;">${bs}</div>`;
+    ['LSTM','GRU'].forEach(m=>{
+      [15,30].forEach(ep=>{
+        const r = EB.find(x=>x.model===m&&x.ep===ep&&x.bs===bs);
+        const intensity = r ? (1-(r.rmse-0.006)/0.017) : 0.5;
+        const g = Math.round(intensity * 200);
+        const color = m==='LSTM' ? `rgba(0,${g+55},255,0.7)` : `rgba(0,${g+55},${g/2+100},0.7)`;
+        const isBest = r && r.rmse < 0.0068;
+        hmHTML += `<div class="heatmap-cell" style="background:${color};border:1px solid ${isBest?'#ffcc00':'transparent'};">
+          <div class="heatmap-opt">${m} E${ep}</div>
+          <div class="heatmap-val">${r?r.rmse.toFixed(5):'-'}</div>
+          <div class="heatmap-sub">R²=${r?(r.r2*100).toFixed(2)+'%':'-'} ${isBest?'⭐':''}</div>
+        </div>`;
+      });
+    });
+    hmHTML += '<div></div>';
+  });
+  hmHTML += '</div>';
+  document.getElementById('epochHeatmap').innerHTML = hmHTML;
+
+  // Results table
+  let tbl = '<tr><th>Model</th><th>Epochs</th><th>Batch</th><th>RMSE</th><th>R²</th><th>Time (s)</th><th>Rating</th></tr>';
+  const sorted = [...EB].sort((a,b)=>a.rmse-b.rmse);
+  sorted.forEach((r,i) => {
+    const cls = i===0 ? 'best-row' : '';
+    const stars = i===0 ? '🏆 BEST' : i<3 ? '⭐ TOP' : '';
+    tbl += `<tr class="${cls}"><td><span class="badge badge-${r.model.toLowerCase()}">${r.model}</span></td><td>${r.ep}</td><td>${r.bs}</td><td>${r.rmse.toFixed(5)}</td><td>${(r.r2*100).toFixed(3)}%</td><td>${r.time.toFixed(0)}</td><td>${stars}</td></tr>`;
+  });
+  document.getElementById('resultsTable').innerHTML = tbl;
+}
+
+function initHyper() {
+  if(window._hyperInit) return;
+  window._hyperInit = true;
+
+  // Optimizer chart
+  new Chart(document.getElementById('optimizerChart').getContext('2d'),{
+    type:'bar',
+    data:{
+      labels:OPT.map(o=>`${o.opt} d=${o.drp}`),
+      datasets:[
+        {label:'R² Score',data:OPT.map(o=>o.r2),backgroundColor:OPT.map(o=>{
+          if(o.opt==='Adam') return 'rgba(0,255,157,0.7)';
+          if(o.opt==='RMSprop') return 'rgba(0,212,255,0.7)';
+          if(o.opt==='SGD') return 'rgba(255,204,0,0.7)';
+          return 'rgba(255,107,53,0.7)';
+        }),borderWidth:1,yAxisID:'y'},
+        {label:'RMSE',data:OPT.map(o=>o.rmse),type:'line',borderColor:'#ff6b35',pointBackgroundColor:'#ff6b35',borderWidth:2,pointRadius:4,yAxisID:'y1'}
+      ]
+    },
+    options:{...chartDefaults,scales:{
+      x:{...chartDefaults.scales.x,ticks:{...chartDefaults.scales.x.ticks,maxRotation:30,font:{family:'Share Tech Mono',size:9}}},
+      y:{...chartDefaults.scales.y,title:{display:true,text:'R² Score',color:'#4a7090',font:{family:'Share Tech Mono',size:10}},min:0.97,max:1.0},
+      y1:{...chartDefaults.scales.y,position:'right',title:{display:true,text:'RMSE',color:'#ff6b35',font:{family:'Share Tech Mono',size:10}},grid:{drawOnChartArea:false}}
+    }}
+  });
+
+  // Seq-LR chart
+  new Chart(document.getElementById('seqLrChart').getContext('2d'),{
+    type:'bar',
+    data:{
+      labels:SEQLR.map(r=>`Seq=${r.seq} LR=${r.lr}`),
+      datasets:[
+        {label:'R² Score',data:SEQLR.map(r=>r.r2),backgroundColor:SEQLR.map(r=>{
+          if(r.r2>0.96) return 'rgba(0,255,157,0.7)';
+          if(r.r2>0.9)  return 'rgba(0,212,255,0.7)';
+          return 'rgba(255,107,53,0.7)';
+        }),borderWidth:1}
+      ]
+    },
+    options:{...chartDefaults,scales:{
+      x:{...chartDefaults.scales.x,ticks:{...chartDefaults.scales.x.ticks,maxRotation:35,font:{family:'Share Tech Mono',size:9}}},
+      y:{...chartDefaults.scales.y,title:{display:true,text:'R² Score',color:'#4a7090',font:{family:'Share Tech Mono',size:10}},min:0.5,max:1.0}
+    }}
+  });
+
+  // Opt heatmap
+  const opts = ['Adam','Adagrad','RMSprop','SGD'];
+  const drops = [0.1, 0.2];
+  let hmHTML = '<div style="display:grid;grid-template-columns:80px repeat(4,1fr);gap:6px;margin-top:12px;">';
+  hmHTML += `<div style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:var(--dim);">Dropout</div>`;
+  opts.forEach(o => hmHTML += `<div style="font-family:'Orbitron',monospace;font-size:0.65rem;color:var(--accent);text-align:center;padding:4px;">${o}</div>`);
+  drops.forEach(d => {
+    hmHTML += `<div style="font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:var(--dim);display:flex;align-items:center;">${d}</div>`;
+    opts.forEach(o => {
+      const r = OPT.find(x=>x.opt===o&&x.drp===d);
+      const intensity = r ? Math.max(0,(r.r2-0.97)/0.03) : 0;
+      const g = Math.round(intensity*255);
+      const color = `rgba(0,${g},${255-g/2},0.7)`;
+      const best = r && r.r2 > 0.998;
+      hmHTML += `<div class="heatmap-cell" style="background:${color};border:1px solid ${best?'#ffcc00':'transparent'};">
+        <div class="heatmap-opt">d=${d}</div>
+        <div class="heatmap-val">R²=${r?(r.r2*100).toFixed(2):'-'}%</div>
+        <div class="heatmap-sub">RMSE=${r?r.rmse.toFixed(4):'-'} ${best?'⭐':''}</div>
+      </div>`;
+    });
+  });
+  hmHTML += '</div>';
+  document.getElementById('optHeatmap').innerHTML = hmHTML;
+
+  // Hyper bar chart (impact visualization)
+  new Chart(document.getElementById('hyperBarChart').getContext('2d'),{
+    type:'bar',
+    data:{
+      labels:['Adam d=0.1','Adam d=0.2','RMSprop 0.1','RMSprop 0.2','SGD d=0.1','SGD d=0.2','Adagrad 0.1','Adagrad 0.2'],
+      datasets:[
+        {label:'R² Score',data:OPT.map(o=>+(o.r2*100).toFixed(4)),backgroundColor:OPT.map(o=>{
+          if(o.opt==='Adam') return 'rgba(0,255,157,0.7)';
+          if(o.opt==='RMSprop') return 'rgba(0,212,255,0.7)';
+          if(o.opt==='SGD') return 'rgba(255,204,0,0.7)';
+          return 'rgba(255,107,53,0.7)';
+        }),borderWidth:1},
+        {label:'Train Time (norm.)',data:OPT.map(o=>+(o.time/258.16*98.5).toFixed(2)),type:'line',borderColor:'#ff6b35',pointBackgroundColor:'#ff6b35',borderWidth:1.5,pointRadius:3,yAxisID:'y'}
+      ]
+    },
+    options:{...chartDefaults,scales:{
+      x:{...chartDefaults.scales.x,ticks:{...chartDefaults.scales.x.ticks,maxRotation:25,font:{family:'Share Tech Mono',size:9}}},
+      y:{...chartDefaults.scales.y,min:97,max:100,title:{display:true,text:'R² (%)',color:'#4a7090',font:{family:'Share Tech Mono',size:10}}}
+    }}
+  });
+}
+
+// ============================================================
+// INIT
+// ============================================================
+initSimCharts();
+updateSimDisplay(0);
+
+</script>
+</body>
+</html>
